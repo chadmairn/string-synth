@@ -1,0 +1,1650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STRING SYNTH</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #020818;
+    overflow: hidden;
+    font-family: 'Share Tech Mono', monospace;
+    color: #00ffff;
+  }
+
+  #app {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Hidden video element: only used as MediaPipe source */
+  #webcam {
+    position: absolute;
+    width: 1px; height: 1px;
+    opacity: 0;
+    pointer-events: none;
+    visibility: hidden;
+  }
+
+  /* Main canvas fills the viewport */
+  #main-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* CRT scanline overlay */
+  #crt-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0.0) 0px,
+      rgba(0,0,0,0.0) 2px,
+      rgba(0,0,0,0.12) 2px,
+      rgba(0,0,0,0.12) 4px
+    );
+    z-index: 10;
+  }
+
+  /* Vignette */
+  #vignette {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,4,20,0.85) 100%);
+    z-index: 11;
+  }
+
+  /* HUD elements */
+  #hud {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    z-index: 20;
+  }
+
+  .hud-corner {
+    position: absolute;
+    width: 40px; height: 40px;
+    border-color: rgba(0,255,255,0.3);
+    border-style: solid;
+  }
+  .hud-corner.tl { top:16px; left:16px; border-width: 2px 0 0 2px; }
+  .hud-corner.tr { top:16px; right:16px; border-width: 2px 2px 0 0; }
+  .hud-corner.bl { bottom:16px; left:16px; border-width: 0 0 2px 2px; }
+  .hud-corner.br { bottom:16px; right:16px; border-width: 0 2px 2px 0; }
+
+  #status {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: rgba(0,255,255,0.5);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  #title {
+    position: absolute;
+    top: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 13px;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    color: rgba(0,255,255,0.4);
+    white-space: nowrap;
+  }
+
+  #hand-count {
+    position: absolute;
+    top: 22px;
+    right: 56px;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: rgba(255,0,255,0.5);
+  }
+
+  /* Mode + Face FX toggles */
+  .mode-btn {
+    position: absolute;
+    pointer-events: auto;
+    background: rgba(2,8,24,0.6);
+    border: 1px solid rgba(0,255,255,0.4);
+    color: rgba(0,255,255,0.75);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 8px 12px;
+    cursor: pointer;
+  }
+  .mode-btn:hover { box-shadow: 0 0 12px #00ffff44; }
+  #mode-toggle { top: 20px; left: 56px; }
+  #facefx-toggle { top: 58px; left: 56px; }
+
+  @keyframes pulse {
+    0%,100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+
+  #permission-screen {
+    position: absolute;
+    inset: 0;
+    background: #020818;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    gap: 24px;
+  }
+
+  #permission-screen h1 {
+    font-size: clamp(20px,4vw,40px);
+    letter-spacing: 8px;
+    background: linear-gradient(90deg, #00ffff, #ff00ff, #ffff00);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  #permission-screen p {
+    font-size: 13px;
+    letter-spacing: 2px;
+    color: rgba(0,255,255,0.6);
+    text-align: center;
+    max-width: 400px;
+    line-height: 1.8;
+  }
+
+  #start-btn {
+    margin-top: 12px;
+    padding: 14px 48px;
+    background: transparent;
+    border: 1px solid #00ffff;
+    color: #00ffff;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #start-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, #00ffff22, #ff00ff22);
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  #start-btn:hover::before { opacity: 1; }
+  #start-btn:hover {
+    box-shadow: 0 0 20px #00ffff55, inset 0 0 20px #00ffff11;
+    letter-spacing: 6px;
+  }
+
+  
+
+  
+  
+  
+  
+  
+  
+  
+
+  /* Patch bay (desktop only) */
+  #patchbay-toggle { top: 96px; left: 56px; }
+  #patchbay {
+    position: absolute;
+    top: 80px; right: 16px;
+    width: 330px;
+    background: rgba(2,8,24,0.9);
+    border: 1px solid rgba(0,255,255,0.35);
+    z-index: 30;
+    pointer-events: auto;
+    padding: 12px;
+    font-size: 10px;
+    letter-spacing: 1px;
+  }
+  .pb-head { text-align: center; letter-spacing: 4px; color: rgba(0,255,255,0.8); margin-bottom: 8px; font-size: 11px; }
+  .pb-cols { display: flex; gap: 10px; position: relative; }
+  .pb-col { flex: 1; display: flex; flex-direction: column; gap: 6px; z-index: 2; }
+  .pb-colhead { font-size: 9px; color: rgba(0,255,255,0.5); letter-spacing: 2px; text-align: center; }
+  .jack {
+    pointer-events: auto;
+    background: rgba(2,8,24,0.6);
+    border: 1px solid rgba(0,255,255,0.4);
+    color: rgba(0,255,255,0.75);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px; letter-spacing: 1px;
+    padding: 6px 4px; cursor: pointer; text-transform: uppercase;
+  }
+  .jack:hover { box-shadow: 0 0 8px #00ffff44; }
+  .jack.sel { background: rgba(0,255,255,0.25); border-color: #00ffff; }
+  .jack.dst { border-color: rgba(255,0,255,0.45); color: rgba(255,150,255,0.85); }
+  #pb-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+  #pb-svg path.cable-hit { pointer-events: stroke; cursor: pointer; }
+  .pb-transport { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; position: relative; z-index: 2; }
+  .pb-btn {
+    pointer-events: auto;
+    background: rgba(2,8,24,0.6);
+    border: 1px solid rgba(0,255,255,0.4);
+    color: rgba(0,255,255,0.75);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px; letter-spacing: 2px;
+    padding: 8px 10px; cursor: pointer; text-transform: uppercase;
+  }
+  .pb-btn:hover { box-shadow: 0 0 8px #00ffff44; }
+  .pb-btn.sel { background: rgba(255,255,0,0.2); border-color: #ffff00; color: #ffff00; }
+  .pb-row { display: flex; align-items: center; gap: 8px; color: rgba(0,255,255,0.6); }
+  .pb-row input[type=range] { flex: 1; accent-color: #00ffff; }
+  .pb-row select {
+    background: #020818; color: rgba(0,255,255,0.75);
+    border: 1px solid rgba(0,255,255,0.4);
+    font-family: 'Share Tech Mono', monospace; font-size: 9px; letter-spacing: 1px;
+    padding: 4px;
+  }
+  #pb-arm-status { font-size: 9px; color: rgba(255,255,0,0.7); letter-spacing: 2px; text-align: center; min-height: 12px; }
+  #pb-steps { display: flex; gap: 6px; margin-top: 4px; align-items: flex-end; height: 58px; position: relative; z-index: 2; }
+  .pstep { flex: 1; background: rgba(0,255,255,0.1); border: 1px solid rgba(0,255,255,0.3); height: 8px; cursor: pointer; }
+  .pstep.cur { border-color: #ffff00; box-shadow: 0 0 10px #ffff0099; }
+  .pb-hint { margin-top: 8px; font-size: 8px; color: rgba(0,255,255,0.4); letter-spacing: 1px; text-align: center; line-height: 1.6; }
+  /* Hold / drone buttons */
+  #hold-row { position: absolute; left: 16px; bottom: 64px; display: flex; gap: 6px; z-index: 20; }
+  .hold-btn {
+    pointer-events: auto;
+    background: rgba(2,8,24,0.6);
+    border: 1px solid rgba(0,255,255,0.4);
+    color: rgba(0,255,255,0.6);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px; letter-spacing: 1px;
+    padding: 6px 9px; cursor: pointer;
+  }
+  .hold-btn.on {
+    border-color: #ffaa00; color: #ffaa00;
+    box-shadow: 0 0 10px #ffaa0088;
+    background: rgba(60,30,0,0.5);
+  }
+
+</style>
+</head>
+<body>
+<div id="app">
+  <video id="webcam" autoplay playsinline muted></video>
+  <canvas id="main-canvas"></canvas>
+  <div id="crt-overlay"></div>
+  <div id="vignette"></div>
+
+  <div id="hud">
+    <div class="hud-corner tl"></div>
+    <div class="hud-corner tr"></div>
+    <div class="hud-corner bl"></div>
+    <div class="hud-corner br"></div>
+    <div id="title">STRING SYNTH</div>
+    <div id="hand-count">HANDS: 0</div>
+    <button id="mode-toggle" class="mode-btn">MODE: DESKTOP</button>
+    <button id="facefx-toggle" class="mode-btn">FACE FX: ON</button>
+    <button id="patchbay-toggle" class="mode-btn">PATCH BAY</button>
+    <div id="patchbay" style="display:none">
+      <div class="pb-head">PATCH BAY</div>
+      <div class="pb-cols">
+        <div class="pb-col"><div class="pb-colhead">SOURCES</div><div id="pb-sources" class="pb-col"></div></div>
+        <div class="pb-col"><div class="pb-colhead">DEST</div><div id="pb-dests" class="pb-col"></div></div>
+      </div>
+      <svg id="pb-svg"></svg>
+      <div class="pb-transport">
+        <div class="pb-row" style="gap:6px">
+          <button id="seq-play" class="pb-btn">PLAY</button>
+          <button id="seq-arm" class="pb-btn">ARM</button>
+        </div>
+        <div class="pb-row"><span>TEMPO</span><input id="seq-tempo" type="range" min="60" max="180" value="120"><span id="seq-bpm">120</span></div>
+        <div class="pb-row"><span>LFO</span><input id="seq-lfo" type="range" min="10" max="1000" value="200"><span id="seq-lfo-hz">2.0 HZ</span></div>
+        <div class="pb-row"><span>SCALE</span><select id="seq-scale">
+          <option value="chromatic">CHROMATIC</option>
+          <option value="major">MAJOR</option>
+          <option value="minor">MINOR</option>
+          <option value="pentatonic" selected>PENTATONIC</option>
+          <option value="dorian">DORIAN</option>
+        </select></div>
+        <div id="pb-arm-status">STEPS READY</div>
+      </div>
+      <div id="pb-steps"></div>
+      <div class="pb-hint">CLICK A SOURCE, THEN A DEST, TO PATCH. CLICK A CABLE TO REMOVE IT. ARM, THEN TOUCH STRINGS TO PROGRAM STEPS.</div>
+    </div>
+    <div id="hold-row"></div>
+    <div id="status">RAISE BOTH HANDS TO BEGIN</div>
+  </div>
+
+  <div id="ai-layer-b" class="ai-layer"></div>
+
+  <div id="permission-screen">
+    <h1>STRING SYNTH</h1>
+    <p id="perm-sub">NEON STRING INTERACTION<br>Requires webcam access to track your hands</p>
+    <button id="start-btn">INITIALIZE</button>
+  </div>
+</div>
+
+<!-- MediaPipe + p5.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let handResults = null;
+let particles = [];
+let mpReady = false;
+let mpCamera = null;
+
+// ─── Mode + face tracking state ───────────────────────────────────────────────
+let phoneMode = false;      // set by detectPhoneMode() at load; toggleable
+let faceFxOn = true;        // desktop FACE FX layer
+let faceMeshObj = null;
+let faceResults = null;
+
+// ─── Modular Synth Engine (Web Audio API, no library overhead) ───────────────
+let audioCtx = null;
+let audioReady = false;
+let stringVoices = [];
+let masterGain, reverbNode, delayNode;
+let masterPanner = null, reverbWetGain = null;
+
+// Pentatonic root frequencies per string: C3 E3 A3 C4 E4
+const STRING_BASE_FREQS = [130.81, 174.61, 220.00, 261.63, 329.63];
+
+// Throttle: only push param updates every N ms
+const AUDIO_UPDATE_MS = 40;
+let lastAudioUpdate = 0;
+
+async function buildReverb(ctx, seconds = 2.5) {
+  const len = ctx.sampleRate * seconds;
+  const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+  }
+  const conv = ctx.createConvolver();
+  conv.buffer = buf;
+  return conv;
+}
+
+// One voice: saw + sub sine -> lowpass -> VCA, with its own LFO on the filter.
+// Used for the 5 string voices and the sequencer voice alike.
+function makeVoice(baseFreq, idx) {
+  const osc = audioCtx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.value = baseFreq;
+  osc.detune.value = (idx % 2 === 0 ? 1 : -1) * 5;
+
+  const sub = audioCtx.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.value = baseFreq / 2;
+
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 280;
+  filter.Q.value = 4;
+
+  const lfo = audioCtx.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = 0.4 + idx * 0.13;
+  const lfoGain = audioCtx.createGain();
+  lfoGain.gain.value = 180;
+  lfo.connect(lfoGain);
+  lfoGain.connect(filter.frequency);
+
+  const vca = audioCtx.createGain();
+  vca.gain.value = 0;
+
+  const subGain = audioCtx.createGain();
+  subGain.gain.value = 0.18;
+
+  osc.connect(filter);
+  sub.connect(subGain);
+  subGain.connect(filter);
+  filter.connect(vca);
+  vca.connect(masterGain);
+  vca.connect(delayNode);
+  vca.connect(reverbNode);
+
+  osc.start();
+  sub.start();
+  lfo.start();
+
+  return {
+    osc, sub, filter, vca, lfo, lfoGain,
+    active: false, baseFreq,
+    targetGain: 0, targetFreq: baseFreq, targetCutoff: 280, targetQ: 4,
+    held: false, heldT: 0
+  };
+}
+
+async function initAudio() {
+  if (audioReady) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Master chain: voices → delay → reverb wet/dry → master gain → out
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.7;
+  masterPanner = audioCtx.createStereoPanner();
+  masterPanner.pan.value = 0;
+  masterGain.connect(masterPanner);
+  masterPanner.connect(audioCtx.destination);
+
+  // Simple feedback delay
+  delayNode = audioCtx.createDelay(1.0);
+  delayNode.delayTime.value = 0.22;
+  const delayFeedback = audioCtx.createGain();
+  delayFeedback.gain.value = 0.32;
+  const delayWet = audioCtx.createGain();
+  delayWet.gain.value = 0.22;
+  delayNode.connect(delayFeedback);
+  delayFeedback.connect(delayNode);
+  delayNode.connect(delayWet);
+  delayWet.connect(masterGain);
+
+  // Convolution reverb
+  reverbNode = await buildReverb(audioCtx, 2.5);
+  const reverbWet = audioCtx.createGain();
+  reverbWet.gain.value = 0.28;
+  reverbWetGain = reverbWet;
+  reverbNode.connect(reverbWet);
+  reverbWet.connect(masterGain);
+
+  // Build 5 string voices + 1 dedicated sequencer voice (same architecture)
+  for (let i = 0; i < 5; i++) {
+    stringVoices.push(makeVoice(STRING_BASE_FREQS[i], i));
+  }
+  seqVoice = makeVoice(220, 5);
+
+  audioReady = true;
+}
+
+// Called from draw loop, throttled, no per-frame ramping
+function updateStringAudio(fi, distNorm, isActive) {
+  if (!audioReady) return;
+  const v = stringVoices[fi];
+  const now = audioCtx.currentTime;
+
+  // Hold/drone: keep sounding at the last position when the hand leaves
+  if (v.held) {
+    if (isActive) v.heldT = distNorm;
+    else { isActive = true; distNorm = v.heldT; }
+  }
+
+  const targetGain   = isActive ? Math.max(0, (1 - distNorm) * 0.45) : 0;
+  const targetFreq   = quantizeFreq(v.baseFreq * (1 + (1 - distNorm) * 0.45) * faceMod.pitchMul, seqScale);
+  const targetCutoff = (280 + (1 - distNorm) * 3000) * faceMod.cutoffMul * patchBus.cutoffMul;
+  const targetLFO    = 0.3 + (1 - distNorm) * 2.2;
+  const targetQ      = 4 * faceMod.resoMul * patchBus.resoMul;
+
+  // Only schedule ramps if value changed meaningfully
+  if (Math.abs(targetGain - v.targetGain) > 0.01) {
+    v.vca.gain.cancelScheduledValues(now);
+    v.vca.gain.setTargetAtTime(targetGain, now, 0.08);
+    v.targetGain = targetGain;
+  }
+  if (Math.abs(targetFreq - v.targetFreq) > 1) {
+    v.osc.frequency.setTargetAtTime(targetFreq, now, 0.12);
+    v.sub.frequency.setTargetAtTime(targetFreq / 2, now, 0.12);
+    v.targetFreq = targetFreq;
+  }
+  if (Math.abs(targetCutoff - v.targetCutoff) > 20) {
+    v.filter.frequency.setTargetAtTime(targetCutoff, now, 0.06);
+    v.targetCutoff = targetCutoff;
+  }
+  if (Math.abs(targetQ - v.targetQ) > 0.2) {
+    v.filter.Q.setTargetAtTime(targetQ, now, 0.08);
+    v.targetQ = targetQ;
+  }
+  v.lfo.frequency.setTargetAtTime(targetLFO, now, 0.3);
+  v.active = isActive;
+}
+
+// Metallic ping on fingertip touch: pure Web Audio, no library
+function triggerTouchBurst(pitchHz) {
+  if (!audioReady) return;
+  try {
+    const now = audioCtx.currentTime;
+    const osc  = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = pitchHz || 600;
+    osc.frequency.setTargetAtTime(pitchHz * 0.3, now, 0.08);
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    osc.connect(gain);
+    gain.connect(reverbNode);
+    gain.connect(masterGain);
+    osc.start(now);
+    osc.stop(now + 0.4);
+  } catch(e) {}
+}
+
+// ─── Face modulation: phone-mode core input, desktop FACE FX layer ────────────
+// FaceMesh landmark indices: 1 nose tip, 33/263 eye outer corners,
+// 13/14 lips, 10 forehead, 152 chin.
+const faceMod = { cutoffMul: 1, pitchMul: 1, pan: 0, reverbWet: 0.28, delayTime: 0.22, resoMul: 1, faceX01: 0.5, faceY01: 0.5, mouth01: 0 };
+const FACE_NEUTRAL = { cutoffMul: 1, pitchMul: 1, pan: 0, reverbWet: 0.28, delayTime: 0.22, resoMul: 1, faceX01: 0.5, faceY01: 0.5, mouth01: 0 };
+
+function activeFaceLandmarks() {
+  if (!faceMeshObj || !faceResults || !faceResults.multiFaceLandmarks ||
+      faceResults.multiFaceLandmarks.length === 0) return null;
+  if (!(phoneMode || faceFxOn)) return null;
+  return faceResults.multiFaceLandmarks[0];
+}
+
+function updateFaceMod() {
+  const lm = activeFaceLandmarks();
+  let t;
+  if (!lm) {
+    t = FACE_NEUTRAL;
+  } else {
+    const nose = lm[1];
+    const eyeL = lm[33], eyeR = lm[263];
+    const lipU = lm[13], lipD = lm[14];
+    const fore = lm[10], chin = lm[152];
+
+    const headX = 1 - nose.x; // mirrored to match the display
+    const headY = nose.y;
+    const faceH = Math.max(0.05, Math.hypot(fore.x - chin.x, fore.y - chin.y));
+    const mouth = Math.hypot(lipU.x - lipD.x, lipU.y - lipD.y) / faceH;
+    const tilt = Math.atan2(eyeR.y - eyeL.y, eyeR.x - eyeL.x);
+    const mouth01 = Math.min(1, mouth / 0.18);
+
+    t = {
+      cutoffMul: 0.35 + headX * 2.15,          // head X -> filter cutoff 0.35x to 2.5x
+      pitchMul: 1.18 - headY * 0.33,           // head Y -> pitch 1.18x (top) to 0.85x (bottom)
+      pan: Math.max(-1, Math.min(1, tilt / 0.5)) * 0.8,
+      reverbWet: mouth01 * 0.9,                // mouth -> reverb wet 0.0 to 0.9
+      delayTime: 0.1 + Math.min(1, Math.abs(tilt) / 0.4) * 0.5, // tilt -> delay 0.1s to 0.6s
+      resoMul: 1 + mouth01 * 0.4,               // mouth -> resonance boost up to +40%
+      faceX01: headX,
+      faceY01: 1 - headY,
+      mouth01: mouth01
+    };
+  }
+
+  // Per-frame smoothing, a touch faster so movement feels connected
+  const k = 0.2;
+  for (const key of Object.keys(faceMod)) {
+    faceMod[key] += (t[key] - faceMod[key]) * k;
+  }
+}
+
+// Push smoothed face modulation into the audio bus (caller throttles)
+function applyFaceAudio() {
+  if (!audioReady || !masterPanner || !reverbWetGain) return;
+  const now = audioCtx.currentTime;
+  // Tilt drives stereo pan on both modes: up to +/-0.8 on phone, +/-0.6 on desktop
+  const panBase = phoneMode ? faceMod.pan : faceMod.pan * 0.75;
+  const panTarget = Math.max(-1, Math.min(1, panBase + (phoneMode ? 0 : patchBus.panAdd)));
+  const reverbTarget = Math.max(0, Math.min(1, faceMod.reverbWet + (phoneMode ? 0 : patchBus.reverbAdd)));
+  const delayTarget = Math.max(0.05, Math.min(1.0, faceMod.delayTime * (phoneMode ? 1 : patchBus.delayMul)));
+
+  if (Math.abs(masterPanner.pan.value - panTarget) > 0.02) {
+    masterPanner.pan.setTargetAtTime(panTarget, now, 0.15);
+  }
+  if (Math.abs(reverbWetGain.gain.value - reverbTarget) > 0.01) {
+    reverbWetGain.gain.setTargetAtTime(reverbTarget, now, 0.2);
+  }
+  if (Math.abs(delayNode.delayTime.value - delayTarget) > 0.01) {
+    delayNode.delayTime.setTargetAtTime(delayTarget, now, 0.2);
+  }
+}
+
+function detectPhoneMode() {
+  const small = window.innerWidth < 820;
+  const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const touch = 'ontouchstart' in window;
+  return (coarse && small) || (touch && small);
+}
+
+const videoEl = document.getElementById('webcam');
+const handCountEl = document.getElementById('hand-count');
+const statusEl = document.getElementById('status');
+const permScreen = document.getElementById('permission-screen');
+const startBtn = document.getElementById('start-btn');
+const modeToggleBtn = document.getElementById('mode-toggle');
+const facefxToggleBtn = document.getElementById('facefx-toggle');
+const patchbayToggleBtn = document.getElementById('patchbay-toggle');
+
+// ─── Patch bay + sequencer + hold state (desktop) ─────────────────────────────
+let patchBayOpen = false;
+let patches = [
+  { src: 'SEQ PITCH', dst: 'PITCH' },
+  { src: 'SEQ CLK', dst: 'AMP' }
+];
+let pendingSrc = null;
+let seqPlaying = false;
+let seqStep = 0;
+let seqLastFired = -1;
+let seqLastPitch01 = 0;
+let seqNextTime = 0;
+let seqBPM = 120;
+let seqArmed = false;
+let seqArmCount = 0;
+let seqScale = 'pentatonic';
+let seqSteps = [0, 0.15, 0.3, 0.45, 0.6, 0.45, 0.3, 0.15].map(p => ({ pitch01: p }));
+let seqVoice = null;
+let patchClock = 0;
+let lastPatchTick = 0;
+let lfoHz = 2, lfoSliderHz = 2;
+let seqPitchSt = 0, seqAmpScale = 1;
+let handLY01 = 0, handRY01 = 0;
+let voicePts = {};
+let voiceDrawn = {};
+const patchBus = { cutoffMul: 1, resoMul: 1, reverbAdd: 0, delayMul: 1, panAdd: 0 };
+const srcVals = {};
+
+const SRC_IDS = ['SEQ CLK', 'SEQ PITCH', 'LFO', 'FACE X', 'FACE Y', 'MOUTH', 'HAND L', 'HAND R'];
+const DST_IDS = ['CUTOFF', 'RESO', 'REVERB', 'DELAY', 'PAN', 'LFO RATE', 'PITCH', 'AMP'];
+
+const SCALES = {
+  chromatic: [0,1,2,3,4,5,6,7,8,9,10,11],
+  major: [0,2,4,5,7,9,11],
+  minor: [0,2,3,5,7,8,10],
+  pentatonic: [0,2,4,7,9],
+  dorian: [0,2,3,5,7,9,10]
+};
+const PITCH_FMIN = 65, PITCH_FMAX = 650;
+
+function freqToPitch01(f) {
+  return Math.max(0, Math.min(1, Math.log(f / PITCH_FMIN) / Math.log(PITCH_FMAX / PITCH_FMIN)));
+}
+function pitch01ToFreq(p01) {
+  const c = Math.max(0, Math.min(1, p01));
+  return PITCH_FMIN * Math.pow(PITCH_FMAX / PITCH_FMIN, c);
+}
+function quantizeFreq(freq, scaleName) {
+  const scale = SCALES[scaleName] || SCALES.pentatonic;
+  const midi = 69 + 12 * Math.log2(Math.max(1, freq) / 440);
+  const root = 48; // C3
+  const rel = midi - root;
+  const oct = Math.floor(rel / 12);
+  const pc = ((Math.round(rel) % 12) + 12) % 12;
+  let best = scale[0], bestD = 99;
+  for (const s of scale) {
+    const d = Math.abs(s - pc);
+    if (d < bestD) { bestD = d; best = s; }
+  }
+  return 440 * Math.pow(2, (root + oct * 12 + best - 69) / 12);
+}
+function handYNorm(hand, lmToCanvas, ph) {
+  if (!hand) return 0;
+  const w = lmToCanvas(hand[0]);
+  return Math.max(0, Math.min(1, 1 - w.y / ph));
+}
+// Overall face-modulation intensity, 0..1, drives the nose-ring brightness
+function faceIntensity() {
+  const c = Math.min(1, Math.abs(faceMod.cutoffMul - 1) / 1.5);
+  const p = Math.min(1, Math.abs(faceMod.pitchMul - 1) / 0.33);
+  const m = Math.min(1, faceMod.reverbWet / 0.9);
+  return (c + p + m) / 3;
+}
+
+patchbayToggleBtn.addEventListener('click', () => {
+  patchBayOpen = !patchBayOpen;
+  const pb = document.getElementById('patchbay');
+  pb.style.display = patchBayOpen ? 'block' : 'none';
+  if (patchBayOpen) requestAnimationFrame(drawCables);
+});
+const permSub = document.getElementById('perm-sub');
+
+function updateModeUI() {
+  modeToggleBtn.textContent = phoneMode ? 'MODE: PHONE' : 'MODE: DESKTOP';
+  facefxToggleBtn.style.display = phoneMode ? 'none' : 'block';
+  facefxToggleBtn.textContent = 'FACE FX: ' + (faceFxOn ? 'ON' : 'OFF');
+  patchbayToggleBtn.style.display = phoneMode ? 'none' : 'block';
+  document.getElementById('patchbay').style.display = (!phoneMode && patchBayOpen) ? 'block' : 'none';
+  permSub.innerHTML = phoneMode
+    ? 'NEON STRING INTERACTION<br>Hold the phone steady. Move your face and one hand to play.'
+    : 'NEON STRING INTERACTION<br>Requires webcam access to track your hands';
+  // Park modulation and silence voices on switch so nothing sticks
+  for (const key of Object.keys(faceMod)) faceMod[key] = FACE_NEUTRAL[key];
+  // Holds do not survive a mode switch; the sequencer stops too
+  stringVoices.forEach(v => { v.held = false; });
+  if (seqPlaying) stopSequencer();
+  buildHoldButtons();
+  if (audioReady) {
+    stringVoices.forEach((v, i) => updateStringAudio(i, 1, false));
+    const now = audioCtx.currentTime;
+    masterPanner.pan.setTargetAtTime(0, now, 0.1);
+    reverbWetGain.gain.setTargetAtTime(0.28, now, 0.1);
+    delayNode.delayTime.setTargetAtTime(0.22, now, 0.1);
+  }
+}
+
+modeToggleBtn.addEventListener('click', () => { phoneMode = !phoneMode; updateModeUI(); });
+facefxToggleBtn.addEventListener('click', () => { faceFxOn = !faceFxOn; updateModeUI(); });
+
+// Detect mode before first paint
+phoneMode = detectPhoneMode();
+updateModeUI();
+
+// Fingertip landmark indices
+const FINGERTIPS = [4, 8, 12, 16, 20];
+// All landmark indices
+const ALL_LANDMARKS = Array.from({length: 21}, (_, i) => i);
+
+// Joint landmark groups for coloring
+const JOINT_GROUPS = {
+  thumb:  [1,2,3,4],
+  index:  [5,6,7,8],
+  middle: [9,10,11,12],
+  ring:   [13,14,15,16],
+  pinky:  [17,18,19,20],
+  wrist:  [0]
+};
+
+// ─── Particle System ──────────────────────────────────────────────────────────
+class Particle {
+  constructor(x, y, color) {
+    this.x = x; this.y = y;
+    this.vx = (Math.random() - 0.5) * 12;
+    this.vy = (Math.random() - 0.5) * 12;
+    this.life = 1.0;
+    this.decay = 0.025 + Math.random() * 0.03;
+    this.size = 2 + Math.random() * 5;
+    this.color = color;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vx *= 0.92;
+    this.vy *= 0.92;
+    this.life -= this.decay;
+  }
+  isDead() { return this.life <= 0; }
+}
+
+// ─── MediaPipe Setup ──────────────────────────────────────────────────────────
+function initMediaPipe() {
+  const hands = new Hands({
+    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6
+  });
+
+  hands.onResults(results => {
+    handResults = results;
+    const n = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+    const faceSeen = faceResults && faceResults.multiFaceLandmarks &&
+                     faceResults.multiFaceLandmarks.length > 0;
+    if (phoneMode) {
+      handCountEl.textContent = 'FACE ' + (faceSeen ? 'YES' : '--') + ' HAND ' + n;
+      statusEl.textContent = (!faceSeen && n === 0) ? 'SHOW YOUR FACE + ONE HAND'
+                           : (!faceSeen) ? 'SHOW YOUR FACE'
+                           : (n === 0) ? 'SHOW ONE HAND'
+                           : 'PHONE MODE ACTIVE';
+    } else {
+      handCountEl.textContent = `HANDS: ${n}`;
+      statusEl.textContent = n === 0 ? 'RAISE BOTH HANDS TO BEGIN'
+                           : n === 1 ? 'DETECTING SECOND HAND…'
+                           : 'STRING ACTIVE';
+    }
+  });
+
+  // FaceMesh: optional layer. If the CDN fails, hand-only mode is unaffected.
+  try {
+    if (typeof FaceMesh !== 'undefined') {
+      faceMeshObj = new FaceMesh({
+        locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+      });
+      faceMeshObj.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+      faceMeshObj.onResults(results => { faceResults = results; });
+    }
+  } catch (e) { faceMeshObj = null; }
+
+  mpCamera = new Camera(videoEl, {
+    onFrame: async () => {
+      await hands.send({image: videoEl});
+      if (faceMeshObj) { try { await faceMeshObj.send({image: videoEl}); } catch (e) {} }
+    },
+    width: 1280,
+    height: 720
+  });
+
+  mpCamera.start().then(() => {
+    mpReady = true;
+  }).catch(err => {
+    statusEl.textContent = 'CAMERA ERROR: ' + err.message;
+  });
+}
+
+// ─── Start Button ─────────────────────────────────────────────────────────────
+startBtn.addEventListener('click', async () => {
+  // initAudio() creates AudioContext from user gesture (required by browsers)
+  await initAudio();
+
+  navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: 'user' } })
+    .then(stream => {
+      videoEl.srcObject = stream;
+      permScreen.style.display = 'none';
+      initMediaPipe();
+    })
+    .catch(err => {
+      statusEl.textContent = 'CAMERA DENIED';
+      console.error(err);
+    });
+});
+
+
+// ─── p5 Sketch ────────────────────────────────────────────────────────────────
+new p5(function(p) {
+  let canvas;
+  let offscreen;  // for glow compositing
+  let lastTouchState = false;
+
+  // Spring-smoothed string vertices
+  let stringPoints = [];
+
+  p.setup = function() {
+    canvas = p.createCanvas(p.windowWidth, p.windowHeight);
+    canvas.parent('app');
+    canvas.id('main-canvas');
+    offscreen = p.createGraphics(p.windowWidth, p.windowHeight);
+    p.colorMode(p.RGB);
+    initStringPoints(20);
+  };
+
+  p.windowResized = function() {
+    p.resizeCanvas(p.windowWidth, p.windowHeight);
+    offscreen.resizeCanvas(p.windowWidth, p.windowHeight);
+    initStringPoints(20);
+  };
+
+  function initStringPoints(n) {
+    stringPoints = [];
+    for (let i = 0; i < n; i++) {
+      stringPoints.push({ x: p.width / 2, y: p.height / 2 });
+    }
+  }
+
+  p.draw = function() {
+    // ── Background: draw mirrored webcam feed ──────────────────────────────
+    p.background(2, 8, 24);
+
+    if (mpReady && videoEl.readyState >= 2) {
+      const ctx = p.drawingContext;
+      const vw = videoEl.videoWidth || 1280;
+      const vh = videoEl.videoHeight || 720;
+      const scale = Math.max(p.width / vw, p.height / vh);
+      const drawW = vw * scale;
+      const drawH = vh * scale;
+      const offsetX = (p.width - drawW) / 2;
+      const offsetY = (p.height - drawH) / 2;
+      ctx.save();
+      ctx.translate(p.width, 0);
+      ctx.scale(-1, 1);
+      ctx.globalAlpha = 0.85;
+      ctx.drawImage(videoEl, p.width - drawW - offsetX, offsetY, drawW, drawH);
+      ctx.restore();
+      // Dark tint to keep neon effects vivid
+      p.fill(2, 8, 24, 90);
+      p.noStroke();
+      p.rect(0, 0, p.width, p.height);
+    }
+
+    drawGrid();
+    updateFaceMod();
+    updateSequencer();
+    voiceDrawn = {};
+    handLY01 = 0;
+    handRY01 = 0;
+
+    // Map landmarks to canvas coords (mirrored X), shared by face + hands
+    function lmToCanvas(lm) {
+      return {
+        x: (1 - lm.x) * p.width,
+        y: lm.y * p.height
+      };
+    }
+
+    if (!mpReady || !handResults || !handResults.multiHandLandmarks) {
+      drawIdleRings();
+      const faceLmIdle = activeFaceLandmarks();
+      if (faceLmIdle) drawFaceIndicator(faceLmIdle, lmToCanvas);
+      drawHeldStrings();
+      updateAndDrawParticles();
+      // Release all voices if hands lost
+      if (audioReady) stringVoices.forEach((v, i) => updateStringAudio(i, 1, false));
+      return;
+    }
+
+    const lms = handResults.multiHandLandmarks;
+    const labels = handResults.multiHandedness;
+
+    // Phone mode: face + one hand, 4 adjacent-pair strings
+    if (phoneMode) {
+      drawPhoneMode(lms, lmToCanvas);
+      const faceLm = activeFaceLandmarks();
+      if (faceLm) drawFaceIndicator(faceLm, lmToCanvas);
+      drawHeldStrings();
+      updateAndDrawParticles();
+      return;
+    }
+
+    // Identify hands
+    let leftHand = null, rightHand = null;
+    if (lms.length === 1) {
+      // With one hand, treat it as whichever label says
+      if (labels && labels[0]) {
+        const label = labels[0].label;
+        // Mirror: MediaPipe "Right" in front camera = user's left
+        if (label === 'Right') leftHand = lms[0];
+        else rightHand = lms[0];
+      } else {
+        leftHand = lms[0];
+      }
+    } else if (lms.length >= 2) {
+      for (let i = 0; i < lms.length; i++) {
+        const label = labels && labels[i] ? labels[i].label : null;
+        if (label === 'Right') leftHand = lms[i];
+        else if (label === 'Left') rightHand = lms[i];
+        else if (i === 0) leftHand = lms[i];
+        else rightHand = lms[i];
+      }
+    }
+
+    handLY01 = handYNorm(leftHand, lmToCanvas, p.height);
+    handRY01 = handYNorm(rightHand, lmToCanvas, p.height);
+
+    // Draw hand silhouettes
+    if (leftHand) drawHandSilhouette(leftHand, lmToCanvas);
+    if (rightHand) drawHandSilhouette(rightHand, lmToCanvas);
+
+    // ── Neon strings between fingertips ─────────────────────────────────────
+    if (leftHand && rightHand) {
+      const leftTips  = FINGERTIPS.map(i => lmToCanvas(leftHand[i]));
+      const rightTips = FINGERTIPS.map(i => lmToCanvas(rightHand[i]));
+
+      // Check touch events
+      let anyTouching = false;
+      for (let li = 0; li < leftTips.length; li++) {
+        for (let ri = 0; ri < rightTips.length; ri++) {
+          const d = p.dist(leftTips[li].x, leftTips[li].y, rightTips[ri].x, rightTips[ri].y);
+          if (d < 28) {
+            anyTouching = true;
+            // Spawn burst
+            const mx = (leftTips[li].x + rightTips[ri].x) / 2;
+            const my = (leftTips[li].y + rightTips[ri].y) / 2;
+            for (let b = 0; b < 8; b++) {
+              const hue = p.random([
+                p.color(0,255,255), p.color(255,0,255), p.color(255,255,0)
+              ]);
+              particles.push(new Particle(mx, my, hue));
+            }
+            // Audio touch burst (throttled)
+            if (!window._lastTouchBurst || Date.now() - window._lastTouchBurst > 120) {
+              triggerTouchBurst(200 + li * 150 + ri * 80);
+              window._lastTouchBurst = Date.now();
+            }
+            // Program sequencer steps while armed: each touch writes its pitch into the next step
+            if (seqArmed && seqArmCount < 8 &&
+                (!window._lastProg || Date.now() - window._lastProg > 250)) {
+              const f = (stringVoices[li].targetFreq + stringVoices[ri].targetFreq) / 2;
+              programStep(seqArmCount, freqToPitch01(f));
+              seqArmCount++;
+              updateArmStatus();
+              window._lastProg = Date.now();
+              if (seqArmCount >= 8) setArmed(false);
+            }
+          }
+        }
+      }
+      lastTouchState = anyTouching;
+
+      // Draw strings: each left fingertip to each right fingertip
+      const pairedColors = [
+        [0, 255, 255],   // cyan: thumb
+        [255, 0, 255],   // magenta: index
+        [255, 220, 0],   // yellow: middle
+        [0, 180, 255],   // azure: ring
+        [200, 0, 255],   // violet: pinky
+      ];
+
+      for (let fi = 0; fi < 5; fi++) {
+        const lt = leftTips[fi];
+        const rt = rightTips[fi];
+        const d = p.dist(lt.x, lt.y, rt.x, rt.y);
+        const maxDist = p.width * 0.9;
+        const t = p.constrain(d / maxDist, 0, 1);
+        const thickness = p.map(t, 0, 1, 5, 1.2);
+        const col = pairedColors[fi];
+
+        // Throttled audio update, only every AUDIO_UPDATE_MS
+        const now = Date.now();
+        if (now - lastAudioUpdate > AUDIO_UPDATE_MS) {
+          updateStringAudio(fi, t, true);
+          if (fi === 4) { lastAudioUpdate = now; applyFaceAudio(); } // reset after last voice
+        }
+
+        drawLaserString(lt, rt, col, thickness, t, fi);
+      }
+
+      // Draw a central web between all fingertips
+      drawCentralWeb(leftTips, rightTips);
+    } else {
+      // One or no hands: release all string voices
+      if (audioReady) stringVoices.forEach((v, i) => updateStringAudio(i, 1, false));
+    }
+
+    // ── Joints & fingertips ──────────────────────────────────────────────────
+    [leftHand, rightHand].forEach((hand, hi) => {
+      if (!hand) return;
+      const isLeft = hi === 0;
+
+      // Draw connections (skeleton)
+      drawHandSkeleton(hand, lmToCanvas, isLeft);
+
+      // Draw joints
+      ALL_LANDMARKS.forEach(idx => {
+        const pt = lmToCanvas(hand[idx]);
+        const isTip = FINGERTIPS.includes(idx);
+        const r = isTip ? 10 : 5;
+
+        let col;
+        if (idx === 0) col = p.color(255, 255, 255);
+        else if (idx <= 4)  col = p.color(0, 255, 255);
+        else if (idx <= 8)  col = p.color(255, 0, 255);
+        else if (idx <= 12) col = p.color(255, 220, 0);
+        else if (idx <= 16) col = p.color(0, 200, 255);
+        else                col = p.color(200, 0, 255);
+
+        drawGlowDot(pt.x, pt.y, r, col, isTip ? 20 : 10);
+      });
+    });
+
+    const faceLmDesk = activeFaceLandmarks();
+    if (faceLmDesk) drawFaceIndicator(faceLmDesk, lmToCanvas);
+
+    drawHeldStrings();
+    updateAndDrawParticles();
+  };
+
+  // ── Face indicator: soft ring at the nose tip ────────────────────────────────
+  function drawFaceIndicator(lm, lmToCanvas) {
+    const nose = lmToCanvas(lm[1]);
+    const ctx = p.drawingContext;
+    const inten = faceIntensity();
+    ctx.save();
+    ctx.shadowBlur = 12 + inten * 28;
+    ctx.shadowColor = 'rgba(0,255,255,0.55)';
+    p.noFill();
+    p.stroke(0, 255, 255, 70 + inten * 150);
+    p.strokeWeight(1.5);
+    p.circle(nose.x, nose.y, 46);
+    ctx.restore();
+  }
+
+  // ── Held/drone strings: dim amber echo where a held string was last seen ──────
+  function drawHeldStrings() {
+    const pulse = 0.5 + 0.5 * Math.sin(p.millis() * 0.006);
+    for (let fi = 0; fi < stringVoices.length; fi++) {
+      const v = stringVoices[fi];
+      if (!v || !v.held || voiceDrawn[fi]) continue;
+      const pt = voicePts[fi];
+      if (!pt) continue;
+      const ctx = p.drawingContext;
+      ctx.save();
+      ctx.shadowBlur = 10 + pulse * 10;
+      ctx.shadowColor = 'rgba(255,170,0,0.7)';
+      p.stroke(255, 170, 0, 90 + pulse * 90);
+      p.strokeWeight(2);
+      p.line(pt.fx, pt.fy, pt.tx, pt.ty);
+      ctx.restore();
+    }
+  }
+
+  // ── Phone mode: one hand, 4 strings from adjacent finger pairs ───────────────
+  function drawPhoneMode(lms, lmToCanvas) {
+    const hand = lms[0];
+    if (!hand) {
+      if (audioReady) stringVoices.forEach((v, i) => updateStringAudio(i, 1, false));
+      return;
+    }
+    drawHandSilhouette(hand, lmToCanvas);
+
+    // Adjacent pairs: thumb-index, index-middle, middle-ring, ring-pinky
+    const PAIRS = [[4, 8], [8, 12], [12, 16], [16, 20]];
+    const pairColors = [
+      [0, 255, 255],
+      [255, 0, 255],
+      [255, 220, 0],
+      [0, 180, 255],
+    ];
+    const tVals = [];
+    for (let fi = 0; fi < PAIRS.length; fi++) {
+      const a = lmToCanvas(hand[PAIRS[fi][0]]);
+      const b = lmToCanvas(hand[PAIRS[fi][1]]);
+      const d = p.dist(a.x, a.y, b.x, b.y);
+      const t = p.constrain(d / (p.width * 0.45), 0, 1);
+      tVals.push(t);
+      const thickness = p.map(t, 0, 1, 6, 1.5);
+      drawLaserString(a, b, pairColors[fi], thickness, t, fi);
+    }
+
+    // Thumb-to-fingertip touch bursts
+    const thumbPt = lmToCanvas(hand[4]);
+    for (const ti of [8, 12, 16, 20]) {
+      const pt = lmToCanvas(hand[ti]);
+      if (p.dist(thumbPt.x, thumbPt.y, pt.x, pt.y) < 30) {
+        const mx = (thumbPt.x + pt.x) / 2;
+        const my = (thumbPt.y + pt.y) / 2;
+        for (let b = 0; b < 6; b++) {
+          particles.push(new Particle(mx, my, p.color(0, 255, 255)));
+        }
+        if (!window._lastTouchBurst || Date.now() - window._lastTouchBurst > 150) {
+          triggerTouchBurst(300 + ti * 40);
+          window._lastTouchBurst = Date.now();
+        }
+      }
+    }
+
+    // Throttled audio: 4 string voices + face bus; park the unused 5th voice
+    const now = Date.now();
+    if (now - lastAudioUpdate > AUDIO_UPDATE_MS) {
+      for (let fi = 0; fi < 4; fi++) updateStringAudio(fi, tVals[fi], true);
+      updateStringAudio(4, 1, false);
+      applyFaceAudio();
+      lastAudioUpdate = now;
+    }
+
+    // Skeleton + joints for the one hand
+    drawHandSkeleton(hand, lmToCanvas, true);
+    ALL_LANDMARKS.forEach(idx => {
+      const pt = lmToCanvas(hand[idx]);
+      const isTip = FINGERTIPS.includes(idx);
+      const r = isTip ? 10 : 5;
+      let col;
+      if (idx === 0) col = p.color(255, 255, 255);
+      else if (idx <= 4)  col = p.color(0, 255, 255);
+      else if (idx <= 8)  col = p.color(255, 0, 255);
+      else if (idx <= 12) col = p.color(255, 220, 0);
+      else if (idx <= 16) col = p.color(0, 200, 255);
+      else                col = p.color(200, 0, 255);
+      drawGlowDot(pt.x, pt.y, r, col, isTip ? 20 : 10);
+    });
+  }
+
+  // ── Draw Functions ──────────────────────────────────────────────────────────
+
+  function drawGrid() {
+    p.stroke(0, 255, 255, 8);
+    p.strokeWeight(0.5);
+    const step = 60;
+    for (let x = 0; x < p.width; x += step) {
+      p.line(x, 0, x, p.height);
+    }
+    for (let y = 0; y < p.height; y += step) {
+      p.line(0, y, p.width, y);
+    }
+  }
+
+  function drawIdleRings() {
+    const t = p.millis() * 0.001;
+    p.noFill();
+    for (let i = 0; i < 4; i++) {
+      const r = 60 + i * 40 + Math.sin(t + i) * 20;
+      const alpha = 30 + Math.sin(t * 0.7 + i) * 20;
+      p.stroke(0, 255, 255, alpha);
+      p.strokeWeight(1);
+      p.circle(p.width / 2, p.height / 2, r * 2);
+    }
+  }
+
+  function drawHandSilhouette(hand, lmToCanvas) {
+    // Soft fill around palm/wrist
+    const wrist = lmToCanvas(hand[0]);
+    p.drawingContext.save();
+    p.drawingContext.shadowBlur = 40;
+    p.drawingContext.shadowColor = 'rgba(0,60,120,0.5)';
+    p.fill(0, 20, 60, 40);
+    p.noStroke();
+    p.circle(wrist.x, wrist.y, 80);
+    p.drawingContext.restore();
+  }
+
+  function drawHandSkeleton(hand, lmToCanvas, isLeft) {
+    const connections = [
+      [0,1],[1,2],[2,3],[3,4],
+      [0,5],[5,6],[6,7],[7,8],
+      [0,9],[9,10],[10,11],[11,12],
+      [0,13],[13,14],[14,15],[15,16],
+      [0,17],[17,18],[18,19],[19,20],
+      [5,9],[9,13],[13,17]
+    ];
+    p.strokeWeight(1);
+    connections.forEach(([a, b]) => {
+      const pa = lmToCanvas(hand[a]);
+      const pb = lmToCanvas(hand[b]);
+      p.drawingContext.save();
+      p.drawingContext.shadowBlur = 6;
+      p.drawingContext.shadowColor = isLeft ? 'rgba(0,255,255,0.3)' : 'rgba(255,0,255,0.3)';
+      p.stroke(isLeft ? p.color(0,255,255,60) : p.color(255,0,255,60));
+      p.line(pa.x, pa.y, pb.x, pb.y);
+      p.drawingContext.restore();
+    });
+  }
+
+  function drawLaserString(from, to, col, thickness, stretch, fingerIndex) {
+    const ctx = p.drawingContext;
+
+    if (fingerIndex >= 0 && fingerIndex < 5) {
+      voicePts[fingerIndex] = { fx: from.x, fy: from.y, tx: to.x, ty: to.y };
+      voiceDrawn[fingerIndex] = true;
+    }
+
+    // Multi-pass glow
+    const passes = [
+      { blur: 30, alpha: 0.15, w: thickness * 4 },
+      { blur: 16, alpha: 0.3,  w: thickness * 2.5 },
+      { blur: 8,  alpha: 0.6,  w: thickness * 1.5 },
+      { blur: 2,  alpha: 1.0,  w: thickness },
+    ];
+
+    passes.forEach(pass => {
+      ctx.save();
+      ctx.shadowBlur = pass.blur;
+      ctx.shadowColor = `rgba(${col[0]},${col[1]},${col[2]},0.9)`;
+      ctx.globalAlpha = pass.alpha;
+
+      // Gradient along the string
+      const grad = ctx.createLinearGradient(from.x, from.y, to.x, to.y);
+      grad.addColorStop(0,   `rgba(${col[0]},${col[1]},${col[2]},1)`);
+      grad.addColorStop(0.5, `rgba(${Math.min(255,col[0]+80)},${Math.min(255,col[1]+80)},${Math.min(255,col[2]+80)},1)`);
+      grad.addColorStop(1,   `rgba(${col[0]},${col[1]},${col[2]},1)`);
+
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = pass.w;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+
+      // Bezier for elastic feel, control points droop with stretch
+      const mx = (from.x + to.x) / 2;
+      const my = (from.y + to.y) / 2 + stretch * 80;
+      ctx.moveTo(from.x, from.y);
+      ctx.quadraticCurveTo(mx, my, to.x, to.y);
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function drawCentralWeb(leftTips, rightTips) {
+    const ctx = p.drawingContext;
+    // Light connecting lines across all L and R tips
+    for (let li = 0; li < leftTips.length; li++) {
+      for (let ri = 0; ri < rightTips.length; ri++) {
+        if (Math.abs(li - ri) <= 1) continue; // skip direct pairs
+        const lt = leftTips[li];
+        const rt = rightTips[ri];
+        const d = p.dist(lt.x, lt.y, rt.x, rt.y);
+        if (d > p.width * 0.6) continue;
+
+        ctx.save();
+        ctx.globalAlpha = 0.08;
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = 'rgba(200,100,255,0.4)';
+        ctx.strokeStyle = 'rgba(200,100,255,0.5)';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(lt.x, lt.y);
+        ctx.lineTo(rt.x, rt.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+
+  function drawGlowDot(x, y, r, col, blurAmt) {
+    const ctx = p.drawingContext;
+    ctx.save();
+    ctx.shadowBlur = blurAmt;
+    ctx.shadowColor = col.toString();
+    p.fill(col);
+    p.noStroke();
+    p.circle(x, y, r * 2);
+    // Bright center
+    p.fill(255, 255, 255, 200);
+    p.circle(x, y, r * 0.6);
+    ctx.restore();
+  }
+
+  function updateAndDrawParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const part = particles[i];
+      part.update();
+      if (part.isDead()) {
+        particles.splice(i, 1);
+        continue;
+      }
+
+      const ctx = p.drawingContext;
+      ctx.save();
+      ctx.globalAlpha = part.life;
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = part.color.toString();
+      p.fill(part.color);
+      p.noStroke();
+      p.circle(part.x, part.y, part.size * part.life * 2);
+      ctx.restore();
+    }
+  }
+});
+
+// ─── Patch bay + sequencer + hold UI ──────────────────────────────────────────
+
+function buildHoldButtons() {
+  const row = document.getElementById('hold-row');
+  if (!row) return;
+  row.innerHTML = '';
+  const n = phoneMode ? 4 : 5;
+  for (let i = 0; i < n; i++) {
+    const b = document.createElement('button');
+    b.className = 'hold-btn';
+    b.textContent = 'H' + (i + 1);
+    b.addEventListener('click', () => toggleHold(i, b));
+    row.appendChild(b);
+  }
+}
+
+function toggleHold(fi, btn) {
+  const v = stringVoices[fi];
+  if (!v) return;
+  v.held = !v.held;
+  btn.classList.toggle('on', v.held);
+  if (!v.held && audioReady) updateStringAudio(fi, 1, false);
+}
+
+function buildJacks() {
+  const sWrap = document.getElementById('pb-sources');
+  const dWrap = document.getElementById('pb-dests');
+  if (!sWrap || !dWrap) return;
+  SRC_IDS.forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'jack';
+    b.textContent = id;
+    b.dataset.jack = id;
+    b.addEventListener('click', () => selectJack('src', id, b));
+    sWrap.appendChild(b);
+  });
+  DST_IDS.forEach(id => {
+    const b = document.createElement('button');
+    b.className = 'jack dst';
+    b.textContent = id;
+    b.dataset.jack = id;
+    b.addEventListener('click', () => selectJack('dst', id, b));
+    dWrap.appendChild(b);
+  });
+}
+
+function selectJack(kind, id, btn) {
+  if (kind === 'src') {
+    document.querySelectorAll('#pb-sources .jack').forEach(j => j.classList.remove('sel'));
+    if (pendingSrc === id) pendingSrc = null;
+    else { pendingSrc = id; btn.classList.add('sel'); }
+  } else if (pendingSrc) {
+    const ix = patches.findIndex(q => q.src === pendingSrc && q.dst === id);
+    if (ix >= 0) patches.splice(ix, 1);
+    else patches.push({ src: pendingSrc, dst: id });
+    pendingSrc = null;
+    document.querySelectorAll('#pb-sources .jack').forEach(j => j.classList.remove('sel'));
+    drawCables();
+  }
+}
+
+function drawCables() {
+  const panel = document.getElementById('patchbay');
+  const svg = document.getElementById('pb-svg');
+  if (!panel || !svg || panel.style.display === 'none') return;
+  const pr = panel.getBoundingClientRect();
+  if (pr.width === 0) return;
+  svg.setAttribute('width', pr.width);
+  svg.setAttribute('height', pr.height);
+  svg.innerHTML = '';
+  const NS = 'http://www.w3.org/2000/svg';
+  patches.forEach(pt => {
+    const s = document.querySelector('#pb-sources .jack[data-jack="' + pt.src + '"]');
+    const d = document.querySelector('#pb-dests .jack[data-jack="' + pt.dst + '"]');
+    if (!s || !d) return;
+    const sr = s.getBoundingClientRect();
+    const dr = d.getBoundingClientRect();
+    const x1 = sr.right - pr.left, y1 = sr.top + sr.height / 2 - pr.top;
+    const x2 = dr.left - pr.left, y2 = dr.top + dr.height / 2 - pr.top;
+    const mx = (x1 + x2) / 2;
+    const dAttr = 'M ' + x1 + ' ' + y1 + ' C ' + mx + ' ' + y1 + ', ' + mx + ' ' + y2 + ', ' + x2 + ' ' + y2;
+    const hit = document.createElementNS(NS, 'path');
+    hit.setAttribute('d', dAttr);
+    hit.setAttribute('stroke', 'rgba(0,0,0,0)');
+    hit.setAttribute('stroke-width', '16');
+    hit.setAttribute('fill', 'none');
+    hit.setAttribute('class', 'cable-hit');
+    hit.addEventListener('click', () => {
+      const ix = patches.indexOf(pt);
+      if (ix >= 0) patches.splice(ix, 1);
+      drawCables();
+    });
+    const vis = document.createElementNS(NS, 'path');
+    vis.setAttribute('d', dAttr);
+    vis.setAttribute('stroke', '#00ffff');
+    vis.setAttribute('stroke-width', '2');
+    vis.setAttribute('fill', 'none');
+    vis.setAttribute('opacity', '0.85');
+    vis.style.filter = 'drop-shadow(0 0 4px rgba(0,255,255,0.8))';
+    svg.appendChild(hit);
+    svg.appendChild(vis);
+  });
+}
+
+function buildSteps() {
+  const wrap = document.getElementById('pb-steps');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  for (let i = 0; i < 8; i++) {
+    const d = document.createElement('div');
+    d.className = 'pstep';
+    d.id = 'step' + i;
+    d.title = 'Step ' + (i + 1) + ': click to clear';
+    d.addEventListener('click', () => {
+      seqSteps[i] = null;
+      d.style.height = '8px';
+    });
+    wrap.appendChild(d);
+    const s = seqSteps[i];
+    d.style.height = (s ? (8 + s.pitch01 * 42) : 8) + 'px';
+  }
+}
+
+function programStep(i, p01) {
+  seqSteps[i] = { pitch01: Math.max(0, Math.min(1, p01)) };
+  const bar = document.getElementById('step' + i);
+  if (bar) bar.style.height = (8 + seqSteps[i].pitch01 * 42) + 'px';
+}
+
+function updateArmStatus() {
+  const el = document.getElementById('pb-arm-status');
+  if (el) el.textContent = seqArmed ? ('ARMED ' + seqArmCount + '/8: TOUCH STRINGS') : 'STEPS READY';
+}
+
+function setArmed(on) {
+  seqArmed = on;
+  if (on) seqArmCount = 0;
+  const b = document.getElementById('seq-arm');
+  if (b) b.classList.toggle('sel', on);
+  updateArmStatus();
+}
+
+function highlightStep(i) {
+  for (let k = 0; k < 8; k++) {
+    const el = document.getElementById('step' + k);
+    if (el) el.classList.toggle('cur', k === i);
+  }
+}
+
+function toggleSeqPlay() {
+  if (!audioReady || !seqVoice) return;
+  if (seqPlaying) { stopSequencer(); return; }
+  seqPlaying = true;
+  seqStep = 0;
+  seqNextTime = audioCtx.currentTime + 0.08;
+  const b = document.getElementById('seq-play');
+  if (b) b.textContent = 'STOP';
+}
+
+function stopSequencer() {
+  seqPlaying = false;
+  seqStep = 0;
+  const b = document.getElementById('seq-play');
+  if (b) b.textContent = 'PLAY';
+  highlightStep(-1);
+  if (audioReady && seqVoice) {
+    const now = audioCtx.currentTime;
+    seqVoice.vca.gain.cancelScheduledValues(now);
+    seqVoice.vca.gain.setTargetAtTime(0, now, 0.05);
+  }
+}
+
+function evalPatchSources() {
+  const t = audioCtx.currentTime;
+  srcVals['SEQ CLK'] = patchClock;
+  srcVals['SEQ PITCH'] = seqLastPitch01;
+  srcVals['LFO'] = 0.5 + 0.5 * Math.sin(2 * Math.PI * lfoHz * t);
+  srcVals['FACE X'] = faceMod.faceX01;
+  srcVals['FACE Y'] = faceMod.faceY01;
+  srcVals['MOUTH'] = faceMod.mouth01;
+  srcVals['HAND L'] = handLY01;
+  srcVals['HAND R'] = handRY01;
+}
+
+function dstSum(dst) {
+  let s = 0, n = 0;
+  for (const p of patches) {
+    if (p.dst === dst) { s += srcVals[p.src] || 0; n++; }
+  }
+  return n ? Math.min(s, 1.5) : null;
+}
+
+function evalPatches() {
+  if (phoneMode || !audioReady) {
+    patchBus.cutoffMul = 1; patchBus.resoMul = 1;
+    patchBus.reverbAdd = 0; patchBus.delayMul = 1; patchBus.panAdd = 0;
+    return;
+  }
+  evalPatchSources();
+  const g = (id, fn) => {
+    const s = dstSum(id);
+    return s === null ? null : fn(s);
+  };
+  let v;
+  patchBus.cutoffMul = (v = g('CUTOFF', s => 0.25 + s * 1.5)) === null ? 1 : v;
+  patchBus.resoMul = (v = g('RESO', s => 0.5 + s * 1.67)) === null ? 1 : v;
+  patchBus.reverbAdd = (v = g('REVERB', s => (s - 0.5) * 1.2)) === null ? 0 : v;
+  patchBus.delayMul = (v = g('DELAY', s => 0.25 + s * 1.5)) === null ? 1 : v;
+  patchBus.panAdd = (v = g('PAN', s => (s - 0.75) * 1.33)) === null ? 0 : v;
+  const lr = g('LFO RATE', s => 0.1 + s * 6.6);
+  lfoHz = lr === null ? lfoSliderHz : Math.max(0.05, Math.min(12, lr));
+  seqPitchSt = (v = g('PITCH', s => (s - 0.75) * 16)) === null ? 0 : v;
+  seqAmpScale = (v = g('AMP', s => s)) === null ? 1 : Math.max(0, v);
+}
+
+function updateSequencer() {
+  if (phoneMode || !audioReady) return;
+  const nowMs = performance.now();
+  const dt = Math.min(0.1, Math.max(0, (nowMs - lastPatchTick) / 1000));
+  lastPatchTick = nowMs;
+  patchClock = Math.max(0, patchClock - dt * 5);
+  evalPatches();
+  if (!seqPlaying || !seqVoice) return;
+  const now = audioCtx.currentTime;
+  const stepDur = 60 / seqBPM / 2;
+  if (seqNextTime < now - 0.5) seqNextTime = now + 0.05;
+  let guard = 0;
+  while (seqNextTime < now + 0.18 && guard++ < 16) {
+    fireStep(seqStep, seqNextTime);
+    seqNextTime += stepDur;
+    seqStep = (seqStep + 1) % 8;
+  }
+}
+
+function fireStep(step, when) {
+  seqLastFired = step;
+  highlightStep(step);
+  const s = seqSteps[step];
+  seqLastPitch01 = (s && s.pitch01 != null) ? s.pitch01 : 0;
+  patchClock = 1;
+  if (!s || s.pitch01 == null) return;
+  const v = seqVoice;
+  const stepDur = 60 / seqBPM / 2;
+  const freq = quantizeFreq(pitch01ToFreq(s.pitch01), seqScale) * Math.pow(2, seqPitchSt / 12);
+  const peak = Math.max(0.001, 0.4 * seqAmpScale);
+  v.osc.frequency.setValueAtTime(freq, when);
+  v.sub.frequency.setValueAtTime(freq / 2, when);
+  v.filter.frequency.setValueAtTime(400 + s.pitch01 * 2500, when);
+  v.vca.gain.cancelScheduledValues(when);
+  v.vca.gain.setValueAtTime(0.0001, when);
+  v.vca.gain.linearRampToValueAtTime(peak, when + 0.012);
+  v.vca.gain.exponentialRampToValueAtTime(0.001, when + stepDur * 0.92);
+}
+
+function initPatchBay() {
+  buildJacks();
+  buildSteps();
+  updateArmStatus();
+  const play = document.getElementById('seq-play');
+  if (play) play.addEventListener('click', toggleSeqPlay);
+  const arm = document.getElementById('seq-arm');
+  if (arm) arm.addEventListener('click', () => setArmed(!seqArmed));
+  const tempo = document.getElementById('seq-tempo');
+  if (tempo) tempo.addEventListener('input', e => {
+    seqBPM = +e.target.value;
+    const lbl = document.getElementById('seq-bpm');
+    if (lbl) lbl.textContent = seqBPM;
+  });
+  const lfo = document.getElementById('seq-lfo');
+  if (lfo) lfo.addEventListener('input', e => {
+    lfoSliderHz = (+e.target.value) / 100;
+    const lbl = document.getElementById('seq-lfo-hz');
+    if (lbl) lbl.textContent = lfoSliderHz.toFixed(1) + ' HZ';
+  });
+  const sc = document.getElementById('seq-scale');
+  if (sc) sc.addEventListener('change', e => { seqScale = e.target.value; });
+  window.addEventListener('resize', () => { drawCables(); });
+  drawCables();
+}
+
+initPatchBay();
+</script>
+</body>
+</html>
